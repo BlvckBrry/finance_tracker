@@ -7,19 +7,79 @@ from rest_framework.mixins import (
     ListModelMixin, 
     CreateModelMixin, 
     UpdateModelMixin, 
-    DestroyModelMixin
+    DestroyModelMixin,
+    RetrieveModelMixin
 )
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
+from django.core.cache import cache
+from .services.currency_api_service import CurrencyAPIService
 from .models import Transaction, Balance, Category, Currency
 from .serializers import (
     TransactionSerializer, 
     TransactionListSerializer, 
     CategorySerializer,
     BalanceSerializer,
-    BalanceDetailSerializer
+    BalanceDetailSerializer,
+    CurrencySerializer, 
+    CurrencyConversionSerializer
 )
+
+class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):    
+    serializer_class = CurrencySerializer
+    queryset = Currency.objects.all()
+    
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+    
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+
+class CurrencyRetrieveView(RetrieveModelMixin, GenericAPIView):    
+    serializer_class = CurrencySerializer
+    queryset = Currency.objects.all()
+    lookup_field = 'code'
+    
+    def get(self, request, *args, **kwargs):
+        return self.retrieve(request, *args, **kwargs)
+
+
+class CurrencyConversionView(APIView):    
+    def get(self, request):
+        serializer = CurrencyConversionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'error': f"Wrong params: {serializer.errors}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        amount = validated_data['amount']
+        from_code = validated_data['from_currency'].upper()
+        to_code = validated_data['to_currency'].upper()
+        
+        try:
+            from_currency = Currency.objects.get(code=from_code)
+            to_currency = Currency.objects.get(code=to_code)
+        except Currency.DoesNotExist:
+            return Response({
+                'error': "Currency was not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        amount_in_uah = amount * from_currency.rate_to_uah
+        converted_amount = amount_in_uah / to_currency.rate_to_uah
+        
+        return Response({
+            'success': True,
+            'conversion': {
+                'original_amount': str(amount),
+                'converted_amount': str(round(converted_amount, 4)),
+                'from_currency': from_code,
+                'to_currency': to_code,
+                'rate': str(round(from_currency.rate_to_uah / to_currency.rate_to_uah, 6))
+            }
+        })
 
 
 class TransactionListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
@@ -124,6 +184,7 @@ class TransactionDetailView(APIView):
 
         if transaction_type == 'income':
             balance.amount += amount
+
         elif transaction_type == 'expense':
             balance.amount -= amount
         
@@ -135,6 +196,7 @@ class TransactionDetailView(APIView):
 
             if transaction_type == 'income':
                 balance.amount -= amount
+                
             elif transaction_type == 'expense':
                 balance.amount += amount
             

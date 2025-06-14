@@ -35,8 +35,8 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - media_volume:/app/media
-      - static_volume:/app/static
+      # - media_volume:/app/media
+      # - static_volume:/app/static
     environment:
       - DEBUG=1
       - DATABASE_URL=postgres://postgres:postgres@db:5432/financial_tracker

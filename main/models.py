@@ -44,7 +44,8 @@ class Transaction(models.Model):
         ('expense', 'Витрата'),
     ]
     
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True)
+    currency = models.ForeignKey(Currency, on_delete=models.CASCADE, null=True, blank=True)
     type = models.CharField(max_length=7, choices=TRANSACTION_TYPES)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     title = models.CharField(max_length=200)  
@@ -69,34 +70,47 @@ class Transaction(models.Model):
         else:
             old_instance._revert_from_balance()
             self._apply_to_balance()
-    
-    def delete(self, *args, **kwargs):
-        self._revert_from_balance()
-        super().delete(*args, **kwargs)
-    
+
     def _apply_to_balance(self):
-        balance, created = Balance.objects.get_or_create(user=self.user, defaults={'currency_id': 1})
-        
+        uah_currency = Currency.objects.get(code='UAH')
+        balance, created = Balance.objects.get_or_create(user=self.user, defaults={'currency': uah_currency})
+        converted_amount = self._convert_to_uah(self.amount)
+
         if self.type == 'income':
-            balance.amount += Decimal(self.amount)
+            balance.amount += Decimal(converted_amount)
+            
         elif self.type == 'expense':
-            balance.amount -= Decimal(self.amount)
-        
+            balance.amount -= Decimal(converted_amount)
+
         balance.save()
-    
+
+
     def _revert_from_balance(self):
         try:
             balance = Balance.objects.get(user=self.user)
-            
+            converted_amount = self._convert_to_uah(self.amount)
+
             if self.type == 'income':
-                balance.amount -= self.amount
+                balance.amount -= Decimal(converted_amount)
+
             elif self.type == 'expense':
-                balance.amount += self.amount
-            
+                balance.amount += Decimal(converted_amount)
+
             balance.save()
 
         except Balance.DoesNotExist:
             pass
+
+    def _convert_to_uah(self, amount):
+        if not self.currency or self.currency.code == 'UAH':
+            return amount
+        
+        try:
+            exchange_rate = self.currency.rate_to_uah
+            converted_amount = amount * Decimal(str(exchange_rate))
+            return converted_amount
+        except Exception as e:
+            return amount
 
     class Meta:
         ordering = ['-created_at']

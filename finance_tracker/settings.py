@@ -77,20 +77,6 @@ TEMPLATES = [
 WSGI_APPLICATION = 'finance_tracker.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'financial_tracker',
-#         'USER': 'postgres',
-#         'PASSWORD': 'postgres',
-#         'HOST': '127.0.0.1', 
-#         'PORT': '5432',       
-#     }
-# }
-
 if os.getenv('DATABASE_URL'):
     DATABASES = {
         'default': dj_database_url.config(
@@ -145,16 +131,22 @@ USE_TZ = True
 
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django_redis.cache.RedisCache',
+#         'LOCATION': REDIS_URL,
+#         'OPTIONS': {
+#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+#         }
+#     }
+# }
+
 CACHES = {
     'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        }
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
     }
 }
-
 
 
 # Static files (CSS, JavaScript, Images)
