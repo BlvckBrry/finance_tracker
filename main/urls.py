@@ -15,4 +15,8 @@ urlpatterns = [
     path('currency/', views.CurrencyListCreateView.as_view(), name='currency'),
     path('currency_conversion/', views.CurrencyConversionView.as_view(), name='currency_conversion'),
     path('currency/<str:code>/', views.CurrencyRetrieveView.as_view(), name='currency_pk'),
+
+    path('excel_reports/', views.FinancialReportsView.as_view(), name='excel_reports'),
+    path('excel_export/', views.ExportExcelView.as_view(), name='excel_export'),
+    path('excel_import/', views.ImportExcelView.as_view(), name='excel_import'),
 ]

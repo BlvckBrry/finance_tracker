@@ -1,7 +1,10 @@
 from django.db.models import Q
 from rest_framework import status
 from decimal import Decimal
+import pandas as pd
 from rest_framework.response import Response
+from datetime import datetime, timedelta
+from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.mixins import (
     ListModelMixin, 
@@ -25,6 +28,7 @@ from .serializers import (
     CurrencySerializer, 
     CurrencyConversionSerializer
 )
+from .financial_analytics import FinancialAnalyticsService
 
 class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):    
     serializer_class = CurrencySerializer
@@ -196,7 +200,7 @@ class TransactionDetailView(APIView):
 
             if transaction_type == 'income':
                 balance.amount -= amount
-                
+
             elif transaction_type == 'expense':
                 balance.amount += amount
             
@@ -331,3 +335,73 @@ class BalanceManualAdjustView(APIView):
             'message': f'Balance adjusted to {amount}',
             'balance': serializer.data
         })
+
+class FinancialReportsView(APIView):
+    def get(self, request):
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        report_type = request.GET.get('report_type', 'balance')
+        
+        if start_date:
+            start_date = pd.to_datetime(start_date).date()
+
+        if end_date:
+            end_date = pd.to_datetime(end_date).date()
+        
+        analytics = FinancialAnalyticsService(request.user, start_date, end_date)
+        
+        if report_type == 'balance':
+            data = analytics.calculate_general_balance()
+
+        elif report_type == 'categories':
+            data = analytics.analyze_by_categories()
+
+        else:
+            return Response({'error': 'Invalid report type'}, status=400)
+        
+        return Response(data)
+
+class ExportExcelView(APIView):
+    def get(self, request):
+        transaction_type = request.GET.get('type')  
+        category_name = request.GET.get('category')  
+        currency_code = request.GET.get('currency')  
+        analytics = FinancialAnalyticsService(start_date=request.GET.get('start_date'), end_date=request.GET.get('end_date'), user=request.user)
+        excel_file = analytics.export_to_excel(transaction_type=transaction_type, category_name=category_name, currency_code=currency_code)
+        if excel_file is None:
+            return HttpResponse("No data for export", status=404)
+
+        filename_parts = ['transactions']
+        if transaction_type:
+            filename_parts.append(transaction_type)
+
+        if category_name:
+            filename_parts.append(category_name.replace(' ', '_'))
+
+        if currency_code:
+            filename_parts.append(currency_code)
+        
+        filename = '_'.join(filename_parts) + '.xlsx'
+        response = HttpResponse(excel_file.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        return response
+
+
+class ImportExcelView(APIView):
+    def post(self, request):
+        if 'file' not in request.FILES:
+            return Response({'error': 'No file provided'}, status=400)
+        
+        excel_file = request.FILES['file']
+        
+        if not excel_file.name.endswith(('.xlsx', '.xls')):
+            return Response({'error': 'Invalid file format'}, status=400)
+        
+        analytics = FinancialAnalyticsService(request.user)
+        result = analytics.import_from_excel(excel_file)
+        
+        if result['success']:
+            return Response(result)
+        else:
+            return Response(result, status=400)
