@@ -56,6 +56,8 @@ class Transaction(models.Model):
         return f"{self.title}: {self.amount} ({self.type})"
     
     def save(self, *args, **kwargs):
+        from .utils import check_spending_limits  
+
         is_new = self.pk is None
         old_instance = None
         
@@ -67,9 +69,13 @@ class Transaction(models.Model):
         
         if is_new:
             self._apply_to_balance()
+            if self.type == 'expense':
+                check_spending_limits(self.user, self.amount, self.currency)
         else:
             old_instance._revert_from_balance()
             self._apply_to_balance()
+            if self.type == 'expense':
+                check_spending_limits(self.user, self.amount, self.currency)
 
     def _apply_to_balance(self):
         uah_currency = Currency.objects.get(code='UAH')
@@ -83,7 +89,6 @@ class Transaction(models.Model):
             balance.amount -= Decimal(converted_amount)
 
         balance.save()
-
 
     def _revert_from_balance(self):
         try:
@@ -109,6 +114,7 @@ class Transaction(models.Model):
             exchange_rate = self.currency.rate_to_uah
             converted_amount = amount * Decimal(str(exchange_rate))
             return converted_amount
+            
         except Exception as e:
             return amount
 

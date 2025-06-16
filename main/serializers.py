@@ -1,7 +1,10 @@
 from rest_framework import serializers
 from .models import Currency, Category, Balance, Transaction
 from decimal import Decimal
+from .utils import calculate_monthly_spending, check_spending_limits 
+from django.contrib.auth import get_user_model
 
+User = get_user_model()
 
 class CurrencySerializer(serializers.ModelSerializer):
     class Meta:
@@ -62,7 +65,6 @@ class TransactionSerializer(serializers.ModelSerializer):
                 'Euro': 'EUR',
                 'Pound': 'GBP',
                 'Hryvnia': 'UAH',
-                'Гривня': 'UAH',
                 'UAH': 'UAH',
                 'USD': 'USD',
                 'EUR': 'EUR',
@@ -149,7 +151,9 @@ class TransactionSerializer(serializers.ModelSerializer):
         if 'amount' in validated_data:
             validated_data['amount'] = abs(validated_data['amount'])
         
-        return super().update(instance, validated_data)
+        updated_instance = super().update(instance, validated_data)
+        return updated_instance
+
 
 class TransactionListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -163,14 +167,48 @@ class TransactionListSerializer(serializers.ModelSerializer):
 
 class BalanceDetailSerializer(serializers.ModelSerializer):
     currency = CurrencySerializer(read_only=True)
-    recent_transactions = TransactionListSerializer(source='user.transaction_set', many=True, read_only=True)
     
     class Meta:
         model = Balance
-        fields = ['id', 'amount', 'currency', 'updated_at', 'recent_transactions']
+        fields = ['id', 'amount', 'currency', 'updated_at']
         read_only_fields = fields
+
+class UserSpendingLimitSerializer(serializers.ModelSerializer):
+    current_monthly_spending = serializers.SerializerMethodField()
+    remaining_budget = serializers.SerializerMethodField()
+    warning_threshold_amount = serializers.SerializerMethodField()
     
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['recent_transactions'] = data['recent_transactions'][:5]
-        return data
+    class Meta:
+        model = User
+        fields = ['spending_limit', 'warning_threshold', 'last_warning_sent', 
+                 'current_monthly_spending', 'remaining_budget', 'warning_threshold_amount']
+        read_only_fields = ['last_warning_sent', 'current_monthly_spending', 
+                           'remaining_budget', 'warning_threshold_amount']
+    
+    def get_current_monthly_spending(self, obj):
+        return calculate_monthly_spending(obj)
+    
+    def get_remaining_budget(self, obj):
+        if not obj.spending_limit:
+            return None
+            
+        current_spending = calculate_monthly_spending(obj)
+        return max(Decimal('0.00'), obj.spending_limit - current_spending)
+    
+    def get_warning_threshold_amount(self, obj):
+        if not obj.spending_limit:
+            return None
+
+        return obj.spending_limit * (obj.warning_threshold / Decimal('100'))
+    
+    def validate_warning_threshold(self, value):
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("Warning threshold must be between 0 and 100 percent.")
+
+        return value
+    
+    def validate_spending_limit(self, value):
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("Spending limit must be greater than 0.")
+
+        return value

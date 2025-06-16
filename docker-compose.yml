@@ -1,6 +1,4 @@
-# docker-compose.yml
 services:
-  # PostgreSQL база даних
   db:
     image: postgres:15-alpine
     restart: always
@@ -13,12 +11,17 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U your_db_user -d your_db_name"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d financial_tracker"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis для кешування та черг (опціонально)
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1026:1025"
+      - "8026:8025"
+
   redis:
     image: redis:7-alpine
     restart: always
@@ -27,7 +30,6 @@ services:
     volumes:
       - redis_data:/data
 
-  # Django web додаток
   web:
     build: .
     restart: always
@@ -35,23 +37,20 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      # - media_volume:/app/media
-      # - static_volume:/app/static
     environment:
-      - DEBUG=1
+      - DEBUG=true
       - DATABASE_URL=postgres://postgres:postgres@db:5432/financial_tracker
       - REDIS_URL=redis://redis:6379/0
+      - DEV_ENV=true
     depends_on:
       db:
         condition: service_healthy
+      mailhog:
+        condition: service_started
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             python manage.py runserver 0.0.0.0:8000"
-
+            python manage.py runserver 0.0.0.0:8000"
 
 volumes:
   postgres_data:
   redis_data:
-  static_volume:
-  media_volume:

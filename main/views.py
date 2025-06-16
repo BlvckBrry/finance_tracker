@@ -26,11 +26,14 @@ from .serializers import (
     BalanceSerializer,
     BalanceDetailSerializer,
     CurrencySerializer, 
-    CurrencyConversionSerializer
+    CurrencyConversionSerializer,
+    UserSpendingLimitSerializer
 )
 from .financial_analytics import FinancialAnalyticsService
+from .utils import calculate_monthly_spending
 
-class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):    
+class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):   
+    permission_classes = [IsAuthenticated] 
     serializer_class = CurrencySerializer
     queryset = Currency.objects.all()
     
@@ -41,7 +44,8 @@ class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
         return self.create(request, *args, **kwargs)
 
 
-class CurrencyRetrieveView(RetrieveModelMixin, GenericAPIView):    
+class CurrencyRetrieveView(RetrieveModelMixin, GenericAPIView): 
+    permission_classes = [IsAuthenticated]   
     serializer_class = CurrencySerializer
     queryset = Currency.objects.all()
     lookup_field = 'code'
@@ -50,7 +54,8 @@ class CurrencyRetrieveView(RetrieveModelMixin, GenericAPIView):
         return self.retrieve(request, *args, **kwargs)
 
 
-class CurrencyConversionView(APIView):    
+class CurrencyConversionView(APIView):   
+    permission_classes = [IsAuthenticated]    
     def get(self, request):
         serializer = CurrencyConversionSerializer(data=request.data)
         if not serializer.is_valid():
@@ -151,62 +156,30 @@ class TransactionDetailView(APIView):
     
     def put(self, request, pk):
         transaction = self.get_object(pk)
-        old_amount = transaction.amount
-        old_type = transaction.type
         serializer = TransactionSerializer(transaction, data=request.data, context={'request': request})
         
         if serializer.is_valid():
-            self._revert_balance_change(transaction.user, old_amount, old_type)
-            updated_transaction = serializer.save()
-            self._apply_balance_change(updated_transaction.user, updated_transaction.amount, updated_transaction.type)
+            serializer.save()
             return Response(serializer.data)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def patch(self, request, pk):
         transaction = self.get_object(pk)
-        old_amount = transaction.amount
-        old_type = transaction.type
-        serializer = TransactionSerializer(transaction, data=request.data, partial=True,context={'request': request})
+        serializer = TransactionSerializer(transaction, data=request.data, partial=True, context={'request': request})
         
         if serializer.is_valid():
-            self._revert_balance_change(transaction.user, old_amount, old_type)
-            updated_transaction = serializer.save()
-            self._apply_balance_change(updated_transaction.user, updated_transaction.amount, updated_transaction.type)
+            serializer.save()
             return Response(serializer.data)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self, request, pk):
         transaction = self.get_object(pk)
-        self._revert_balance_change(transaction.user, transaction.amount, transaction.type)
+        transaction._revert_from_balance()
         transaction.delete()
+
         return Response("Transaction was successfully deleted", status=status.HTTP_204_NO_CONTENT)
-    
-    def _apply_balance_change(self, user, amount, transaction_type):
-        balance, created = Balance.objects.get_or_create(user=user, defaults={'currency_id': 1})
-
-        if transaction_type == 'income':
-            balance.amount += amount
-
-        elif transaction_type == 'expense':
-            balance.amount -= amount
-        
-        balance.save()
-    
-    def _revert_balance_change(self, user, amount, transaction_type):
-        try:
-            balance = Balance.objects.get(user=user)
-
-            if transaction_type == 'income':
-                balance.amount -= amount
-
-            elif transaction_type == 'expense':
-                balance.amount += amount
-            
-            balance.save()
-        except Balance.DoesNotExist:
-            pass
 
 
 class CategoryListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
@@ -272,8 +245,9 @@ class BalanceView(APIView):
             balance = Balance.objects.get(user=request.user)
             serializer = BalanceDetailSerializer(balance, context={'request': request})
             return Response(serializer.data)
+
         except Balance.DoesNotExist:
-            default_currency = Currency.objects.first()
+            default_currency = Currency.objects.get(code="UAH")
             if not default_currency:
                 return Response({'error': 'No currency found in the system'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -290,7 +264,7 @@ class BalanceResetView(APIView):
         Category.objects.filter(user=request.user).delete()
         balance, created = Balance.objects.get_or_create(user=request.user,
             defaults={
-                'currency': Currency.objects.first(),
+                'currency': Currency.objects.get(code='UAH'),
                 'amount': 0.00
             }
         )
@@ -316,6 +290,7 @@ class BalanceManualAdjustView(APIView):
         
         try:
             amount = float(amount)
+
         except (ValueError, TypeError):
             return Response({'error': 'Incorrect amount'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -335,6 +310,64 @@ class BalanceManualAdjustView(APIView):
             'message': f'Balance adjusted to {amount}',
             'balance': serializer.data
         })
+
+class SpendingLimitView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        return self.request.user
+    
+    def get(self, request):
+        user = self.get_object()
+        serializer = UserSpendingLimitSerializer(user, context={'request': request})
+        return Response(serializer.data)
+    
+    def put(self, request):
+        user = self.get_object()
+        serializer = UserSpendingLimitSerializer(user, data=request.data, context={'request': request})
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def patch(self, request):
+        user = self.get_object()
+        serializer = UserSpendingLimitSerializer(user, data=request.data, partial=True, context={'request': request})
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SpendingSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        return self.request.user
+    
+    def get(self, request):
+        user = self.get_object()
+        current_spending = calculate_monthly_spending(user)
+        
+        data = {
+            'current_monthly_spending': current_spending,
+            'spending_limit': user.spending_limit,
+            'warning_threshold': user.warning_threshold,
+            'last_warning_sent': user.last_warning_sent,
+        }
+        
+        if user.spending_limit:
+            data['remaining_budget'] = max(0, user.spending_limit - current_spending)
+            data['warning_threshold_amount'] = user.spending_limit * (user.warning_threshold / 100)
+            data['percentage_used'] = (current_spending / user.spending_limit * 100) if user.spending_limit > 0 else 0
+            data['is_over_limit'] = current_spending > user.spending_limit
+            data['is_near_limit'] = current_spending >= data['warning_threshold_amount']
+        
+        return Response(data)
 
 class FinancialReportsView(APIView):
     def get(self, request):
@@ -362,7 +395,11 @@ class FinancialReportsView(APIView):
         return Response(data)
 
 class ExportExcelView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self, request):
+        if not request.user.is_authenticated:
+            return HttpResponse("Unauthorized", status=401)
+            
         transaction_type = request.GET.get('type')  
         category_name = request.GET.get('category')  
         currency_code = request.GET.get('currency')  

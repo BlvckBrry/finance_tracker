@@ -154,18 +154,17 @@ class FinancialAnalyticsService:
         }
     
     def export_to_excel(self, transaction_type=None, category_name=None, currency_code=None):
-        df = self.get_transactions_dataframe()
+        df = self.get_transactions_dataframe()        
         if df.empty:
             return None
 
-        filtered_df = df.copy()
+        filtered_df = df.copy()        
         if transaction_type:
             if transaction_type.lower() == 'income':
                 filtered_df = filtered_df[filtered_df['type'] == 'income']
-
             elif transaction_type.lower() == 'expense':
                 filtered_df = filtered_df[filtered_df['type'] == 'expense']
-        
+    
         if category_name:
             filtered_df = filtered_df[filtered_df['category__name'].str.contains(category_name, case=False, na=False)]
         
@@ -257,7 +256,7 @@ class FinancialAnalyticsService:
                 'amount_uah': 'count'
             }).reset_index()
             daily_stats.columns = ['Date', 'Incomes', 'Expenses', 'Number of transactions']
-            daily_stats['Clean result'] = daily_stats['Incomes'] - daily_stats['Expanses']
+            daily_stats['Clean result'] = daily_stats['Incomes'] - daily_stats['Expenses']
             daily_stats.to_excel(writer, sheet_name='Daily statistic', index=False)
             ws_daily = writer.sheets['Daily statistic']
             ws_daily.column_dimensions['A'].width = 15  
@@ -284,30 +283,6 @@ class FinancialAnalyticsService:
         
         output.seek(0)
         return output
-
-    def _analyze_filtered_categories(self, df):
-        income_data = df[df['type'] == 'income']
-        expense_data = df[df['type'] == 'expense']
-        income_categories = []
-        if not income_data.empty:
-            income_by_category = income_data.groupby('category__name')['amount_uah'].sum().reset_index()
-            income_categories = [
-                {'category': row['category__name'], 'total_amount': row['amount_uah']}
-                for _, row in income_by_category.iterrows()
-            ]
-        
-        expense_categories = []
-        if not expense_data.empty:
-            expense_by_category = expense_data.groupby('category__name')['amount_uah'].sum().reset_index()
-            expense_categories = [
-                {'category': row['category__name'], 'total_amount': row['amount_uah']}
-                for _, row in expense_by_category.iterrows()
-            ]
-        
-        return {
-            'income_categories': income_categories,
-            'expense_categories': expense_categories
-        }
     
     def import_from_excel(self, excel_file):
         try:
@@ -386,5 +361,6 @@ class FinancialAnalyticsService:
         try:
             balance = Balance.objects.get(user=self.user)
             return float(balance.amount)
+            
         except Balance.DoesNotExist:
             return 0.0

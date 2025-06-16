@@ -19,4 +19,7 @@ urlpatterns = [
     path('excel_reports/', views.FinancialReportsView.as_view(), name='excel_reports'),
     path('excel_export/', views.ExportExcelView.as_view(), name='excel_export'),
     path('excel_import/', views.ImportExcelView.as_view(), name='excel_import'),
+
+    path('spending_limit/', views.SpendingLimitView.as_view(), name='spending-limit'),
+    path('spending_summary/', views.SpendingSummaryView.as_view(), name='spending-summary'),
 ]
