@@ -1,8 +1,13 @@
 from rest_framework import serializers
-from .models import Currency, Category, Balance, Transaction
-from decimal import Decimal
-from .utils import calculate_monthly_spending, check_spending_limits 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from decimal import Decimal
+import decimal
+import pandas as pd
+from .models import Currency, Category, Balance, Transaction
+from .utils import calculate_monthly_spending
+from .financial_analytics import FinancialAnalyticsService
 
 User = get_user_model()
 
@@ -11,6 +16,7 @@ class CurrencySerializer(serializers.ModelSerializer):
         model = Currency
         fields = ['code', 'name', 'rate_to_uah', 'updated_at']
         read_only_fields = ['updated_at']
+
 
 class CurrencyConversionSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=15, decimal_places=4)
@@ -22,6 +28,36 @@ class CurrencyConversionSerializer(serializers.Serializer):
             raise serializers.ValidationError("The amount must be greater than 0.")
         return value
 
+    def validate(self, attrs):
+        from_code = attrs['from_currency'].upper()
+        to_code = attrs["to_currency"].upper()
+
+        try:
+            Currency.objects.get(code=from_code)
+            Currency.objects.get(code=to_code)
+        except Currency.DoesNotExist:
+            raise serializers.ValidationError("Currency was not found")
+        
+        return attrs
+
+    def to_representation(self, instance):
+        amount = instance["amount"]
+        from_code = instance["from_currency"].upper()
+        to_code = instance["to_currency"].upper()
+
+        from_currency = Currency.objects.get(code=from_code)
+        to_currency = Currency.objects.get(code=to_code)
+        
+        amount_in_uah = amount * from_currency.rate_to_uah
+        converted_amount = amount_in_uah / to_currency.rate_to_uah
+        
+        return {
+            'original_amount': amount,
+            'from_currency': from_code,
+            'to_currency': to_code,
+            'converted_amount': converted_amount
+        }
+
 
 class CategorySerializer(serializers.ModelSerializer):    
     class Meta:
@@ -32,6 +68,11 @@ class CategorySerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
+    
+    def validate_delete(self, category):
+        if Transaction.objects.filter(category=category).exists():
+            raise serializers.ValidationError('Unable to delete a category used in transactions')
+        return True
 
 
 class BalanceSerializer(serializers.ModelSerializer):
@@ -41,7 +82,118 @@ class BalanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Balance
         fields = ['id', 'amount', 'currency', 'currency_id', 'updated_at']
-        read_only_fields = ['id', 'amount', 'updated_at']  
+        read_only_fields = ['id', 'amount', 'updated_at']
+
+    def get_or_create_balance(self, user):
+        try:
+            balance = Balance.objects.get(user=user)
+            return balance, False
+        except Balance.DoesNotExist:
+            default_currency = Currency.objects.get(code="UAH")
+            if not default_currency:
+                raise serializers.ValidationError({'error': 'No currency found in the system'})
+            
+            balance = Balance.objects.create(user=user, currency=default_currency, amount=0.00)
+            return balance, True
+
+
+class BalanceResetSerializer(serializers.Serializer):
+    def reset_balance(self, user):
+        Transaction.objects.filter(user=user).delete()
+        Category.objects.filter(user=user).delete()
+        balance, created = Balance.objects.get_or_create(
+            user=user,
+            defaults={
+                'currency': Currency.objects.get(code='UAH'),
+                'amount': 0.00
+            }
+        )
+        balance.amount = 0.00
+        balance.save()
+        
+        return {
+            'message': 'Balance reset to zero, all transactions and categories were deleted',
+            'balance': BalanceDetailSerializer(balance).data
+        }
+
+
+class BalanceManualAdjustSerializer(serializers.Serializer):
+    amount = serializers.FloatField()
+    reason = serializers.CharField(max_length=255, default='Manual adjustment')
+    
+    def validate_amount(self, value):
+        if value == 0:
+            raise serializers.ValidationError('Amount cannot be zero.')
+        return value
+    
+    def adjust_balance(self, user):
+        amount = self.validated_data['amount']
+        reason = self.validated_data['reason']
+        
+        balance, created = Balance.objects.get_or_create(
+            user=user,
+            defaults={
+                'currency': Currency.objects.first(),
+                'amount': 0.00
+            }
+        )
+        
+        adjustment_category, created = Category.objects.get_or_create(
+            name='Balance adjustment', 
+            user=user
+        )
+        
+        transaction_type = 'income' if amount > 0 else 'expense'
+        Transaction.objects.create(
+            user=user, 
+            type=transaction_type, 
+            amount=abs(amount), 
+            title=reason, 
+            category=adjustment_category
+        )
+        
+        balance.refresh_from_db()
+        
+        return {
+            'message': f'Balance adjusted to {amount}',
+            'balance': BalanceDetailSerializer(balance).data
+        }
+
+
+class TransactionFilterSerializer(serializers.Serializer):
+    category = serializers.ListField(child=serializers.CharField(), required=False)
+    type = serializers.ChoiceField(choices=['income', 'expense'], required=False)
+    min_amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=False)
+    max_amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=False)
+    
+    def filter_queryset(self, queryset):
+        filters = Q()
+        
+        category_ids = self.validated_data.get('category', [])
+        if category_ids:
+            try:
+                category_ids = [int(cat_id) for cat_id in category_ids if cat_id.isdigit()]
+                if category_ids:
+                    filters &= Q(category_id__in=category_ids)
+            except (ValueError, TypeError):
+                pass
+
+        transaction_type = self.validated_data.get('type')
+        if transaction_type:
+            filters &= Q(type=transaction_type)
+        
+        min_amount = self.validated_data.get('min_amount')
+        if min_amount:
+            filters &= Q(amount__gte=min_amount)
+        
+        max_amount = self.validated_data.get('max_amount')
+        if max_amount:
+            filters &= Q(amount__lte=max_amount)
+        
+        if filters:
+            queryset = queryset.filter(filters)
+        
+        return queryset.order_by('-created_at')
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -153,6 +305,11 @@ class TransactionSerializer(serializers.ModelSerializer):
         
         updated_instance = super().update(instance, validated_data)
         return updated_instance
+    
+    def delete_transaction(self, transaction):
+        transaction._revert_from_balance()
+        transaction.delete()
+        return "Transaction was successfully deleted"
 
 
 class TransactionListSerializer(serializers.ModelSerializer):
@@ -172,6 +329,7 @@ class BalanceDetailSerializer(serializers.ModelSerializer):
         model = Balance
         fields = ['id', 'amount', 'currency', 'updated_at']
         read_only_fields = fields
+
 
 class UserSpendingLimitSerializer(serializers.ModelSerializer):
     current_monthly_spending = serializers.SerializerMethodField()
@@ -212,3 +370,117 @@ class UserSpendingLimitSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Spending limit must be greater than 0.")
 
         return value
+
+
+class SpendingSummarySerializer(serializers.Serializer):
+    def get_spending_summary(self, user):
+        current_spending = calculate_monthly_spending(user)
+        
+        data = {
+            'current_monthly_spending': current_spending,
+            'spending_limit': user.spending_limit,
+            'warning_threshold': user.warning_threshold,
+            'last_warning_sent': user.last_warning_sent,
+        }
+        
+        if user.spending_limit:
+            data['remaining_budget'] = max(0, user.spending_limit - current_spending)
+            data['warning_threshold_amount'] = user.spending_limit * (user.warning_threshold / 100)
+            data['percentage_used'] = (current_spending / user.spending_limit * 100) if user.spending_limit > 0 else 0
+            data['is_over_limit'] = current_spending > user.spending_limit
+            data['is_near_limit'] = current_spending >= data['warning_threshold_amount']
+        
+        return data
+
+
+class FinancialReportsSerializer(serializers.Serializer):
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+    report_type = serializers.ChoiceField(choices=['balance', 'categories'], default='balance')
+    
+    def generate_report(self, user):
+        start_date = self.validated_data.get('start_date')
+        end_date = self.validated_data.get('end_date')
+        report_type = self.validated_data.get('report_type', 'balance')
+        
+        if start_date:
+            start_date = pd.to_datetime(start_date).date()
+
+        if end_date:
+            end_date = pd.to_datetime(end_date).date()
+        
+        analytics = FinancialAnalyticsService(user, start_date, end_date)
+        
+        if report_type == 'balance':
+            data = analytics.calculate_general_balance()
+        elif report_type == 'categories':
+            data = analytics.analyze_by_categories()
+        else:
+            raise serializers.ValidationError({'error': 'Invalid report type'})
+        
+        return data
+
+
+class ExportExcelSerializer(serializers.Serializer):
+    type = serializers.CharField(required=False)
+    category = serializers.CharField(required=False)
+    currency = serializers.CharField(required=False)
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+    
+    def export_to_excel(self, user):
+        transaction_type = self.validated_data.get('type')
+        category_name = self.validated_data.get('category')
+        currency_code = self.validated_data.get('currency')
+        start_date = self.validated_data.get('start_date')
+        end_date = self.validated_data.get('end_date')
+        
+        analytics = FinancialAnalyticsService(
+            start_date=start_date, 
+            end_date=end_date, 
+            user=user
+        )
+        
+        excel_file = analytics.export_to_excel(
+            transaction_type=transaction_type, 
+            category_name=category_name, 
+            currency_code=currency_code
+        )
+        
+        if excel_file is None:
+            raise serializers.ValidationError("No data for export")
+
+        filename_parts = ['transactions']
+        if transaction_type:
+            filename_parts.append(transaction_type)
+        if category_name:
+            filename_parts.append(category_name.replace(' ', '_'))
+        if currency_code:
+            filename_parts.append(currency_code)
+        
+        filename = '_'.join(filename_parts) + '.xlsx'
+        
+        return {
+            'file': excel_file,
+            'filename': filename
+        }
+
+
+class ImportExcelSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    
+    def validate_file(self, value):
+        if not value.name.endswith(('.xlsx', '.xls')):
+            raise serializers.ValidationError('Invalid file format')
+        return value
+    
+    def import_from_excel(self, user):
+        excel_file = self.validated_data['file']
+        
+        analytics = FinancialAnalyticsService(user)
+        result = analytics.import_from_excel(excel_file)
+        
+        if not result['success']:
+            raise serializers.ValidationError(result)
+        
+        return result
