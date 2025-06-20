@@ -1,9 +1,10 @@
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import GenericAPIView, RetrieveAPIView, RetrieveUpdateDestroyAPIView, CreateAPIView, RetrieveUpdateAPIView
+from rest_framework.viewsets import GenericViewSet
+from rest_framework.mixins import ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin
 from rest_framework.views import APIView
-from rest_framework.generics import GenericAPIView
-from rest_framework.mixins import ListModelMixin, CreateModelMixin, RetrieveModelMixin
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 
@@ -18,33 +19,26 @@ from .serializers import (
 )
 
 
-class CurrencyListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):   
+class CurrencyListCreateViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):   
     permission_classes = [IsAuthenticated] 
     serializer_class = CurrencySerializer
     queryset = Currency.objects.all()
-    
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-    
-    def post(self, request, *args, **kwargs):
-        return self.create(request, *args, **kwargs)
 
 
-class CurrencyRetrieveView(RetrieveModelMixin, GenericAPIView): 
+class CurrencyRetrieveViewSet(RetrieveModelMixin, GenericViewSet): 
     permission_classes = [IsAuthenticated]   
     serializer_class = CurrencySerializer
     queryset = Currency.objects.all()
     lookup_field = 'code'
-    
-    def get(self, request, *args, **kwargs):
-        return self.retrieve(request, *args, **kwargs)
+    lookup_value_regex = '[A-Z]{3}'
 
 
-class CurrencyConversionView(APIView):   
-    permission_classes = [IsAuthenticated]    
+class CurrencyConversionViewSet(CreateModelMixin, GenericViewSet):   
+    permission_classes = [IsAuthenticated]
+    serializer_class = CurrencyConversionSerializer
     
-    def get(self, request):
-        serializer = CurrencyConversionSerializer(data=request.data)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response({
                 'error': f"Wrong params: {serializer.errors}"
@@ -54,7 +48,7 @@ class CurrencyConversionView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
-class TransactionListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
+class TransactionListCreateViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_serializer_class(self):
@@ -77,99 +71,45 @@ class TransactionListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView
             queryset = filter_serializer.filter_queryset(queryset)
         
         return queryset
-    
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-    
-    def post(self, request, *args, **kwargs):
-        return self.create(request, *args, **kwargs)
 
 
-class TransactionDetailView(APIView):
+class TransactionDetailViewSet(RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = TransactionSerializer
     
-    def get_object(self, pk):
-        return get_object_or_404(Transaction, pk=pk, user=self.request.user)
+    def get_queryset(self):
+        return Transaction.objects.filter(user=self.request.user)
     
-    def get(self, request, pk):
-        transaction = self.get_object(pk)
-        serializer = TransactionSerializer(transaction, context={'request': request})
-        return Response(serializer.data)
+    def get_serializer_context(self):
+        return {'request': self.request}
     
-    def put(self, request, pk):
-        transaction = self.get_object(pk)
-        serializer = TransactionSerializer(transaction, data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def patch(self, request, pk):
-        transaction = self.get_object(pk)
-        serializer = TransactionSerializer(transaction, data=request.data, partial=True, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def delete(self, request, pk):
-        transaction = self.get_object(pk)
+    def destroy(self, request, *args, **kwargs):
+        transaction = self.get_object()
         serializer = TransactionSerializer(transaction, context={'request': request})
         message = serializer.delete_transaction(transaction)
         return Response(message, status=status.HTTP_204_NO_CONTENT)
 
 
-class CategoryListCreateView(ListModelMixin, CreateModelMixin, GenericAPIView):
+class CategoryListCreateViewSet(ListModelMixin, CreateModelMixin, GenericViewSet):
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
         return Category.objects.filter(user=self.request.user)
-    
-    def get(self, request, *args, **kwargs):
-        return self.list(request, *args, **kwargs)
-    
-    def post(self, request, *args, **kwargs):
-        return self.create(request, *args, **kwargs)
 
 
-class CategoryDetailView(APIView):
+class CategoryDetailViewSet(RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = CategorySerializer
     
-    def get_object(self, pk):
-        return get_object_or_404(Category, pk=pk, user=self.request.user)
+    def get_queryset(self):
+        return Category.objects.filter(user=self.request.user)
     
-    def get(self, request, pk):
-        category = self.get_object(pk)
-        serializer = CategorySerializer(category, context={'request': request})
-        return Response(serializer.data)
+    def get_serializer_context(self):
+        return {'request': self.request}
     
-    def put(self, request, pk):
-        category = self.get_object(pk)
-        serializer = CategorySerializer(category, data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def patch(self, request, pk):
-        category = self.get_object(pk)
-        serializer = CategorySerializer(category, data=request.data, partial=True, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def delete(self, request, pk):
-        category = self.get_object(pk)
+    def destroy(self, request, *args, **kwargs):
+        category = self.get_object()
         serializer = CategorySerializer(category, context={'request': request})
         
         try:
@@ -180,34 +120,42 @@ class CategoryDetailView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class BalanceView(APIView):
+class BalanceViewSet(RetrieveModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = BalanceDetailSerializer
     
-    def get(self, request):
-        serializer = BalanceSerializer(context={'request': request})
-        balance, created = serializer.get_or_create_balance(request.user)
-        
-        balance_serializer = BalanceDetailSerializer(balance, context={'request': request})
-        
+    def get_balance_object(self):
+        serializer = BalanceSerializer(context={'request': self.request})
+        balance, created = serializer.get_or_create_balance(self.request.user)
         if created:
-            return Response(balance_serializer.data, status=status.HTTP_201_CREATED)
-        return Response(balance_serializer.data)
-
-
-class BalanceResetView(APIView):
-    permission_classes = [IsAuthenticated]
+            balance._created = True
+        return balance
     
-    def post(self, request):
-        serializer = BalanceResetSerializer()
+    def list(self, request, *args, **kwargs):
+        instance = self.get_balance_object()
+        serializer = self.get_serializer(instance)
+        return Response(
+            serializer.data, 
+            status=status.HTTP_201_CREATED if hasattr(instance, '_created') else status.HTTP_200_OK
+        )
+
+
+class BalanceResetViewSet(CreateModelMixin, GenericViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = BalanceResetSerializer
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer()
         result = serializer.reset_balance(request.user)
         return Response(result)
 
 
-class BalanceManualAdjustView(APIView):
+class BalanceManualAdjustViewSet(CreateModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = BalanceManualAdjustSerializer
     
-    def post(self, request):
-        serializer = BalanceManualAdjustSerializer(data=request.data)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
         
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -216,58 +164,45 @@ class BalanceManualAdjustView(APIView):
         return Response(result)
 
 
-class SpendingLimitView(APIView):
+class SpendingLimitViewSet(RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = UserSpendingLimitSerializer
     
     def get_object(self):
         return self.request.user
     
-    def get(self, request):
-        user = self.get_object()
-        serializer = UserSpendingLimitSerializer(user, context={'request': request})
-        return Response(serializer.data)
-    
-    def put(self, request):
-        user = self.get_object()
-        serializer = UserSpendingLimitSerializer(user, data=request.data, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def patch(self, request):
-        user = self.get_object()
-        serializer = UserSpendingLimitSerializer(user, data=request.data, partial=True, context={'request': request})
-        
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def get_serializer_context(self):
+        return {'request': self.request}
 
 
-class SpendingSummaryView(APIView):
+class SpendingSummaryViewSet(RetrieveModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = SpendingSummarySerializer
     
-    def get(self, request):
-        serializer = SpendingSummarySerializer()
+    def get_object(self):
+        return self.request.user
+    
+    def retrieve(self, request, *args, **kwargs):
+        serializer = self.get_serializer()
         data = serializer.get_spending_summary(request.user)
         return Response(data)
 
 
-class FinancialReportsView(APIView):
+class FinancialReportsViewSet(RetrieveModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
+    serializer_class = FinancialReportsSerializer
     
-    def get(self, request):
+    def get_object(self):
+        return self.request.user
+    
+    def retrieve(self, request, *args, **kwargs):
         data = {
             'start_date': request.GET.get('start_date'),
             'end_date': request.GET.get('end_date'),
             'report_type': request.GET.get('report_type', 'balance'),
         }
         
-        serializer = FinancialReportsSerializer(data=data)
+        serializer = self.get_serializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
@@ -282,13 +217,18 @@ class ExportExcelView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        data = {
-            'type': request.GET.get('type'),
-            'category': request.GET.get('category'),
-            'currency': request.GET.get('currency'),
-            'start_date': request.GET.get('start_date'),
-            'end_date': request.GET.get('end_date'),
-        }
+        data = {}
+        
+        if request.GET.get('type'):
+            data['type'] = request.GET.get('type')
+        if request.GET.get('category'):
+            data['category'] = request.GET.get('category')
+        if request.GET.get('currency'):
+            data['currency'] = request.GET.get('currency')
+        if request.GET.get('start_date'):
+            data['start_date'] = request.GET.get('start_date')
+        if request.GET.get('end_date'):
+            data['end_date'] = request.GET.get('end_date')
         
         serializer = ExportExcelSerializer(data=data)
         if not serializer.is_valid():

@@ -206,7 +206,7 @@ class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = ['id', 'type', 'amount', 'title', 'category', 'category_name', 'currency', 'currency_info', 'currency_code', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'currency_info']  
     
     def validate(self, data):
         currency_from_request = data.get('currency')
@@ -263,11 +263,15 @@ class TransactionSerializer(serializers.ModelSerializer):
             return amount
     
     def create(self, validated_data):
-        category_name = validated_data.pop('category_name')
-        currency_code = validated_data.pop('currency_code', None) 
+        category_name = validated_data.pop('category_name', None)
+        currency_code = validated_data.pop('currency_code', None)        
+        validated_data.pop('currency', None)  
         user = self.context['request'].user
-        category, created = Category.objects.get_or_create(name=category_name, user=user)
-        validated_data['category'] = category
+        
+        if category_name:
+            category, created = Category.objects.get_or_create(name=category_name, user=user)
+            validated_data['category'] = category
+        
         validated_data['user'] = user
 
         if currency_code:
@@ -275,16 +279,25 @@ class TransactionSerializer(serializers.ModelSerializer):
                 currency = Currency.objects.get(code=currency_code)
                 validated_data['currency'] = currency
             except Currency.DoesNotExist:
-                uah_currency, created = Currency.objects.get_or_create(code='UAH', defaults={'name': 'Ukrainian Hryvnia'})
+                uah_currency, created = Currency.objects.get_or_create(
+                    code='UAH', 
+                    defaults={'name': 'Ukrainian Hryvnia'}
+                )
                 validated_data['currency'] = uah_currency
         else:
-            uah_currency, created = Currency.objects.get_or_create(code='UAH', defaults={'name': 'Ukrainian Hryvnia'})
+            uah_currency, created = Currency.objects.get_or_create(
+                code='UAH', 
+                defaults={'name': 'Ukrainian Hryvnia'}
+            )
             validated_data['currency'] = uah_currency
 
         if 'amount' in validated_data:
             validated_data['amount'] = abs(validated_data['amount'])
         
-        transaction = super().create(validated_data)
+        model_fields = [f.name for f in Transaction._meta.fields]
+        cleaned_data = {k: v for k, v in validated_data.items() if k in model_fields}
+        
+        transaction = Transaction.objects.create(**cleaned_data)
         return transaction
     
     def update(self, instance, validated_data):
