@@ -480,12 +480,26 @@ class ExportExcelSerializer(serializers.Serializer):
 
 
 class ImportExcelSerializer(serializers.Serializer):
-    file = serializers.FileField()
+    file = serializers.FileField(required=False)
     
-    def validate_file(self, value):
-        if not value.name.endswith(('.xlsx', '.xls')):
-            raise serializers.ValidationError('Invalid file format')
-        return value
+    def validate(self, data):
+        file_obj = None
+        
+        if 'file' in data and data['file']:
+            file_obj = data['file']
+        else:
+            request = self.context.get('request')
+            if request and hasattr(request, 'FILES') and request.FILES:
+                file_obj = list(request.FILES.values())[0]
+        
+        if not file_obj:
+            raise serializers.ValidationError({'file': 'No file provided'})
+            
+        if not file_obj.name.endswith(('.xlsx', '.xls')):
+            raise serializers.ValidationError({'file': 'Invalid file format'})
+            
+        data['file'] = file_obj
+        return data
     
     def import_from_excel(self, user):
         excel_file = self.validated_data['file']

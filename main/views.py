@@ -6,6 +6,8 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework.mixins import ListModelMixin, CreateModelMixin, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin
 from rest_framework.views import APIView
 from django.http import HttpResponse
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 
 from .models import Currency, Transaction, Category, Balance
@@ -174,6 +176,21 @@ class SpendingLimitViewSet(RetrieveModelMixin, UpdateModelMixin, GenericViewSet)
     def get_serializer_context(self):
         return {'request': self.request}
 
+    @action(detail=False, methods=['get', 'put', 'patch'], url_path='me')
+    def current_user_limit(self, request):
+        if request.method == 'GET':
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+
+        else:  
+            partial = request.method == 'PATCH'
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
+
 
 class SpendingSummaryViewSet(RetrieveModelMixin, GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -252,9 +269,10 @@ class ExportExcelView(APIView):
 
 class ImportExcelView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
     
     def post(self, request):
-        serializer = ImportExcelSerializer(data=request.FILES)
+        serializer = ImportExcelSerializer(data=request.data, context={'request': request})
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
