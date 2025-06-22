@@ -2,22 +2,21 @@ from django.db import models
 from django.contrib.auth.models import User
 from decimal import Decimal
 from django.conf import settings
+from .mixins import CreatedAtMixin, UpdatedAtMixin
 
 
-class Currency(models.Model):
+class Currency(UpdatedAtMixin, models.Model):
     code = models.CharField(max_length=3, unique=True)  
     name = models.CharField(max_length=50)  
     rate_to_uah = models.DecimalField(max_digits=10, decimal_places=4, default=1.0000)
-    updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
         return f"{self.code} - {self.name}"
 
 
-class Category(models.Model):
+class Category(CreatedAtMixin, models.Model):
     name = models.CharField(max_length=100) 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         verbose_name_plural = "Categories"
@@ -28,17 +27,16 @@ class Category(models.Model):
         return self.name
 
 
-class Balance(models.Model):
+class Balance(UpdatedAtMixin, models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     currency = models.ForeignKey(Currency, on_delete=models.CASCADE, default='UAH')
-    updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
         return f"{self.user.username}: {self.amount} {self.currency.code}"
 
 
-class Transaction(models.Model):
+class Transaction(CreatedAtMixin, models.Model):
     TRANSACTION_TYPES = [
         ('income', 'Дохід'),
         ('expense', 'Витрата'),
@@ -50,7 +48,6 @@ class Transaction(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     title = models.CharField(max_length=200)  
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return f"{self.title}: {self.amount} ({self.type})"

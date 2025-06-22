@@ -5,11 +5,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
-      POSTGRES_DB: financial_tracker
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d financial_tracker"]
       interval: 10s
@@ -19,14 +19,14 @@ services:
   mailhog:
     image: mailhog/mailhog
     ports:
-      - "1026:1025"
-      - "8026:8025"
+      - "${MAILHOG_SMTP}:1025"
+      - "${MAILHOG_UI}:8025"
 
   redis:
     image: redis:7-alpine
     restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"
     volumes:
       - redis_data:/data
 
@@ -34,14 +34,14 @@ services:
     build: .
     restart: always
     ports:
-      - "8000:8000"
+      - "${WEB_PORT}:8000"
     volumes:
       - .:/app
     environment:
-      - DEBUG=true
-      - DATABASE_URL=postgres://postgres:postgres@db:5432/financial_tracker
-      - REDIS_URL=redis://redis:6379/0
-      - DEV_ENV=true
+      - DEBUG=${DEBUG}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - DEV_ENV=${DEV_ENV}
     depends_on:
       db:
         condition: service_healthy

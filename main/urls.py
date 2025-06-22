@@ -1,25 +1,29 @@
 from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from . import views
 
+router = DefaultRouter()
+
+router.register('transaction', views.TransactionListCreateViewSet, basename='transaction-list')
+router.register('transaction_detail', views.TransactionDetailViewSet, basename='transaction-detail')
+
+router.register('category', views.CategoryListCreateViewSet, basename='category-list')
+router.register('category_detail', views.CategoryDetailViewSet, basename='category-detail')
+
+router.register('currency', views.CurrencyListCreateViewSet, basename='currency-list')
+router.register('currency_detail', views.CurrencyRetrieveViewSet, basename='currency-detail')
+router.register('currency_conversion', views.CurrencyConversionViewSet, basename='currency-conversion')
+
+router.register('balance', views.BalanceViewSet, basename='balance')
+router.register('balance_reset', views.BalanceResetViewSet, basename='balance-reset')
+router.register('balance_manual', views.BalanceManualAdjustViewSet, basename='balance-manual')
+
+router.register('spending_limit', views.SpendingLimitViewSet, basename='spending-limit')
+router.register('spending_summary', views.SpendingSummaryViewSet, basename='spending-summary')
+router.register('financial_reports', views.FinancialReportsViewSet, basename='financial-reports')
+
 urlpatterns = [
-    path('transaction/', views.TransactionListCreateView.as_view(), name='transaction'),
-    path('transaction/<int:pk>/', views.TransactionDetailView.as_view(), name='transaction_pk'),
-    
-    path('category/', views.CategoryListCreateView.as_view(), name='category'),
-    path('category/<int:pk>/', views.CategoryDetailView.as_view(), name='category_pk'),
-
-    path('balance/', views.BalanceView.as_view(), name='balance'),
-    path('balance_reset/', views.BalanceResetView.as_view(), name='balance_reset'),
-    path('balance_manual/', views.BalanceManualAdjustView.as_view(), name='balance_manual'),
-
-    path('currency/', views.CurrencyListCreateView.as_view(), name='currency'),
-    path('currency_conversion/', views.CurrencyConversionView.as_view(), name='currency_conversion'),
-    path('currency/<str:code>/', views.CurrencyRetrieveView.as_view(), name='currency_pk'),
-
-    path('excel_reports/', views.FinancialReportsView.as_view(), name='excel_reports'),
-    path('excel_export/', views.ExportExcelView.as_view(), name='excel_export'),
-    path('excel_import/', views.ImportExcelView.as_view(), name='excel_import'),
-
-    path('spending_limit/', views.SpendingLimitView.as_view(), name='spending-limit'),
-    path('spending_summary/', views.SpendingSummaryView.as_view(), name='spending-summary'),
+    path('', include(router.urls)),    
+    path('excel_export/', views.ExportExcelView.as_view(), name='excel-export'),
+    path('excel_import/', views.ImportExcelView.as_view(), name='excel-import'),
 ]

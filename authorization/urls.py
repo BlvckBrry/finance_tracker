@@ -6,6 +6,7 @@ urlpatterns = [
     path('login/', views.LoginView.as_view(), name='login'),
     path('users/', views.UserListView.as_view(), name='userlist'),
     path('profile/', views.UserDetailView.as_view(), name='user_detail'),
+    path('delete/', views.UserDeleteView.as_view(), name='user_delete'),
 
     path('email_verification_send/', views.EmailVerificationSendView.as_view(), name='email_verification_send'),
     path('email_verification_confirm/', views.EmailVerificationConfirmView.as_view(), name='email_verification_confirm'),
