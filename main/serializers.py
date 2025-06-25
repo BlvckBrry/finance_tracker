@@ -8,6 +8,7 @@ import pandas as pd
 from .models import Currency, Category, Balance, Transaction
 from .utils import calculate_monthly_spending
 from .financial_analytics import FinancialAnalyticsService
+from .constants import UAH_CURRENCY_NAME
 
 User = get_user_model()
 
@@ -281,13 +282,13 @@ class TransactionSerializer(serializers.ModelSerializer):
             except Currency.DoesNotExist:
                 uah_currency, created = Currency.objects.get_or_create(
                     code='UAH', 
-                    defaults={'name': 'Ukrainian Hryvnia'}
+                    defaults={'name': UAH_CURRENCY_NAME}
                 )
                 validated_data['currency'] = uah_currency
         else:
             uah_currency, created = Currency.objects.get_or_create(
                 code='UAH', 
-                defaults={'name': 'Ukrainian Hryvnia'}
+                defaults={'name': UAH_CURRENCY_NAME}
             )
             validated_data['currency'] = uah_currency
 

@@ -1,0 +1,1 @@
+UAH_CURRENCY_NAME = 'Ukrainian Hryvnia'
