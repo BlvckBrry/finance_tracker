@@ -5,7 +5,7 @@ from django.conf import settings
 from .mixins import CreatedAtMixin, UpdatedAtMixin
 
 
-class Currency(UpdatedAtMixin, models.Model):
+class Currency(UpdatedAtMixin):
     code = models.CharField(max_length=3, unique=True)  
     name = models.CharField(max_length=50)  
     rate_to_uah = models.DecimalField(max_digits=10, decimal_places=4, default=1.0000)
@@ -14,7 +14,7 @@ class Currency(UpdatedAtMixin, models.Model):
         return f"{self.code} - {self.name}"
 
 
-class Category(CreatedAtMixin, models.Model):
+class Category(CreatedAtMixin):
     name = models.CharField(max_length=100) 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     
@@ -27,7 +27,7 @@ class Category(CreatedAtMixin, models.Model):
         return self.name
 
 
-class Balance(UpdatedAtMixin, models.Model):
+class Balance(UpdatedAtMixin):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     currency = models.ForeignKey(Currency, on_delete=models.CASCADE, default='UAH')
@@ -36,7 +36,7 @@ class Balance(UpdatedAtMixin, models.Model):
         return f"{self.user.username}: {self.amount} {self.currency.code}"
 
 
-class Transaction(CreatedAtMixin, models.Model):
+class Transaction(CreatedAtMixin):
     TRANSACTION_TYPES = [
         ('income', 'Дохід'),
         ('expense', 'Витрата'),
