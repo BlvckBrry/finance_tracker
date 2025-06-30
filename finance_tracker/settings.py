@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
+import logging
 import dj_database_url
 from pathlib import Path
 from datetime import timedelta
@@ -144,6 +145,30 @@ CACHES = {
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
+class CustomFormatter(logging.Formatter):
+    def format(self, record):
+        if hasattr(record, 'status_code'):
+            record.status_code_str = f"[{record.status_code}]"
+        else:
+            record.status_code_str = ""
+            
+        if hasattr(record, 'url') or hasattr(record, 'path'):
+            path = getattr(record, 'url', getattr(record, 'path', ''))
+            record.path_str = f"[{path}]" if path else ""
+        else:
+            record.path_str = ""
+            
+        if hasattr(record, 'currency_code'):
+            record.currency_str = f"[{record.currency_code}]"
+        else:
+            record.currency_str = ""
+            
+        if hasattr(record, 'error_type'):
+            record.error_type_str = f"[{record.error_type}]"
+        else:
+            record.error_type_str = ""
+        
+        return super().format(record)
 
 LOGGING = {
     'version': 1,
@@ -153,21 +178,83 @@ LOGGING = {
             'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
             'style': '{',
         },
+        'detailed': {
+            '()': CustomFormatter,
+            'format': '{levelname} {asctime} {module}.{funcName} {status_code_str}{path_str}{currency_str}{error_type_str} {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'simple': {
+            'format': '{levelname} {asctime} {message}',
+            'style': '{',
+            'datefmt': '%H:%M:%S',
+        },
+    },
+    'filters': {
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
+            'formatter': 'detailed',
+            'level': 'DEBUG',
+        },
+        'console_simple': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+            'level': 'INFO',
+            'filters': ['require_debug_false'],
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs', 'app.log'),
+            'maxBytes': 1024*1024*5,  # 5MB
+            'backupCount': 5,
+            'formatter': 'detailed',
+            'level': 'INFO',
+        },
+        'error_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs', 'error.log'),
+            'maxBytes': 1024*1024*5,  # 5MB
+            'backupCount': 3,
+            'formatter': 'detailed',
+            'level': 'ERROR',
         },
     },
     'root': {
-        'handlers': ['console'],
+        'handlers': ['console', 'file'],
         'level': 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console'],
+            'handlers': ['console_simple', 'file'],
             'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console', 'error_file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers': ['console', 'error_file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'currency': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'currency.services': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
             'propagate': False,
         },
     },

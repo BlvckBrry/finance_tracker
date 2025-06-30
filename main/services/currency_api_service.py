@@ -18,36 +18,47 @@ class CurrencyAPIService:
         cached_data = cache.get(cache_key)
 
         if cached_data:
-            print("Using cached data")
+            logger.info("Using cached currency data")
             return cached_data
         
         try:
-            print("SENDING A REQUEST TO API...")
+            logger.info("Sending request to currency API", extra={
+                'url': self.base_url,
+                'timeout': self.timeout
+            })
             response = requests.get(self.base_url, timeout=self.timeout, headers={'User-Agent': 'Django Currency App 1.0'})
             response.raise_for_status()
             data = response.json()
-            print(f"API RESPONSE RECEIVED. Status: {response.status_code}")
+            logger.info("API response received successfully", extra={
+                'status_code': response.status_code,
+                'response_size': len(str(data))
+            })
             
             if 'rates' not in data:
-                print("ERROR: 'rates' NOT FOUND IN API RESPONSE")
+                logger.error("Rates not found in API response", extra={'response_data': data})
                 return None
             
-            print(f"FOUND {len(data['rates'])} CURRENCIES IN API")
-            print(f"FIRST 10 CURRENCIES: {list(data['rates'].keys())[:10]}")
+            logger.info("Currency rates fetched from API", extra={
+                'currencies_count': len(data['rates']),
+                'sample_currencies': list(data['rates'].keys())[:10]
+            })
             cache.set(cache_key, data, self.cache_timeout)
             return data
             
         except requests.exceptions.RequestException as e:
-            print(f"Request API error: {e}")
-            logger.error(f"Request API error: {e}")
+            logger.error("Request API error occurred", extra={
+                'error': str(e),
+                'url': self.base_url,
+                'timeout': self.timeout
+            })
             return None
     
     def update_database_currencies(self) -> bool:
-        print("\n=== UPDATING CURRENCIES ===")
+        logger.info("Starting currency update process")
         api_data = self.fetch_currencies_from_api()
         
         if not api_data or 'rates' not in api_data:
-            print("ERROR: NO DATA RECEIVED FROM API")
+            logger.error("No data received from API for currency update")
             return False
         
         currency_names = {
@@ -66,15 +77,14 @@ class CurrencyAPIService:
         
         try:
             rates = api_data['rates']
-            print(f"PROCESSING {len(rates)} CURRENCIES")
+            logger.info("Processing currency rates", extra={'total_rates': len(rates)})
             
             if 'UAH' not in rates:
-                print("CRITICAL ERROR: UAH NOT FOUND IN API!")
+                logger.critical("UAH currency not found in API response", extra={'available_currencies': list(rates.keys())})
                 return False
             
             usd_rate_to_uah = rates['UAH']
-            print(f"USD TO UAH RATE: {usd_rate_to_uah}")
-            print("UPDATING USD")
+            logger.info("Processing USD currency", extra={'usd_to_uah_rate': usd_rate_to_uah})
             usd_currency, created = Currency.objects.update_or_create(
                 code='USD',
                 defaults={
@@ -82,8 +92,13 @@ class CurrencyAPIService:
                     'rate_to_uah': Decimal(str(usd_rate_to_uah))
                 }
             )
-            print(f"USD {'CREATED' if created else 'UPDATED'}: {usd_currency}")
-            print("UPDATE UAH...")
+            logger.info("USD currency processed", extra={
+                'action': 'created' if created else 'updated',
+                'currency_code': usd_currency.code,
+                'rate': str(usd_currency.rate_to_uah)
+            })
+            
+            logger.info("Processing UAH currency")
             uah_currency, created = Currency.objects.update_or_create(
                 code='UAH',
                 defaults={
@@ -91,8 +106,13 @@ class CurrencyAPIService:
                     'rate_to_uah': Decimal('1.0000')
                 }
             )
-            print(f"UAH {'CREATED' if created else 'UPDATED'}: {uah_currency}")
-            print("\nWE PROCESS OTHER CURRENCIES...")
+            logger.info("UAH currency processed", extra={
+                'action': 'created' if created else 'updated',
+                'currency_code': uah_currency.code,
+                'rate': str(uah_currency.rate_to_uah)
+            })
+            
+            logger.info("Processing other currencies")
             processed_count = 0
             error_count = 0
             
@@ -101,9 +121,15 @@ class CurrencyAPIService:
                     continue
                 
                 try:
-                    print(f"Processing {code}: {usd_rate}")                    
+                    logger.debug("Processing currency", extra={
+                        'currency_code': code,
+                        'usd_rate': usd_rate
+                    })
                     rate_to_uah = Decimal(str(usd_rate_to_uah)) / Decimal(str(usd_rate))
-                    print(f"Rate {code} to UAH: {rate_to_uah}")
+                    logger.debug("Calculated rate to UAH", extra={
+                        'currency_code': code,
+                        'rate_to_uah': str(rate_to_uah)
+                    })
                     currency, created = Currency.objects.update_or_create(
                         code=code,
                         defaults={
@@ -111,30 +137,39 @@ class CurrencyAPIService:
                             'rate_to_uah': rate_to_uah
                         }
                     )
-                    action = 'CREATED' if created else 'UPDATED'
-                    print(f"  {code} {action}: {currency}")
+                    logger.debug("Currency processed successfully", extra={
+                        'currency_code': code,
+                        'action': 'created' if created else 'updated',
+                        'rate': str(currency.rate_to_uah)
+                    })
                     processed_count += 1
                     
                 except Exception as e:
-                    print(f"ERROR processing {code}: {e}")
+                    logger.warning("Error processing currency", extra={
+                        'currency_code': code,
+                        'error': str(e)
+                    })
                     error_count += 1
                     continue
             
-            print(f"\n=== RESULT ===")
-            print(f"SUCCESSFULLY PROCESSED: {processed_count}")
-            print(f"ERRORS: {error_count}")            
             total_currencies = Currency.objects.count()
-            print(f"TOTAL CURRENCIES IN THE BASE: {total_currencies}")
-            print("CURRENCIES IN THE DATABASE:")
-            for currency in Currency.objects.all()[:10]:  
-                print(f"{currency.code}: {currency.name} = {currency.rate_to_uah}")
+            sample_currencies = list(Currency.objects.all()[:10])
             
-            logger.info(f"Currencies successfully updated: {processed_count} processed, {error_count} errors")
+            logger.info("Currency update completed", extra={
+                'processed_count': processed_count,
+                'error_count': error_count,
+                'total_currencies_in_db': total_currencies,
+                'sample_currencies': [
+                    {'code': c.code, 'name': c.name, 'rate': str(c.rate_to_uah)} 
+                    for c in sample_currencies
+                ]
+            })
+            
             return True
             
         except Exception as e:
-            print(f"CRITICAL ERROR: {e}")
-            logger.error(f"Currency update error: {e}")
-            import traceback
-            print(f"TRACEBACK: {traceback.format_exc()}")
+            logger.error("Critical error during currency update", extra={
+                'error': str(e),
+                'error_type': type(e).__name__
+            }, exc_info=True)
             return False
